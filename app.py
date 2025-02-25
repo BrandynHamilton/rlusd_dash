@@ -104,6 +104,28 @@ app.layout = html.Div(style={'backgroundColor': 'var(--color-background)'}, chil
     ]),
     html.Div(className='graph-container', children=[
         dcc.Graph(id='supply_by_liquidity3')
+    ]),
+
+    # Footer Section
+    html.Footer(style={
+        'backgroundColor': '#333',
+        'color': '#fff',
+        'textAlign': 'center',
+        'padding': '20px',
+        'marginTop': '40px'
+    }, children=[
+        html.P([
+            "Contact: ",
+            html.A("brandynham1120@gmail.com",
+                   href="mailto:brandynham1120@gmail.com",
+                   style={'color': '#fff'})
+        ]),
+        html.P([
+            "Github/Documentation: ",
+            html.A("https://github.com/BrandynHamilton/rlusd_dash",
+                   href="https://github.com/BrandynHamilton/rlusd_dash",
+                   style={'color': '#fff'})
+        ]),
     ])
 ])
 

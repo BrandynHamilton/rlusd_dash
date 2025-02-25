@@ -1,0 +1,5 @@
+curl -X POST http://localhost:5256/run_job
+curl http://localhost:5256/status
+curl -X POST http://localhost:5256/clear_cache
+
+

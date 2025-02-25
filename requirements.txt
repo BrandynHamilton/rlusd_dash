@@ -1,0 +1,9 @@
+dash
+web3==6.20.3
+chart-builder
+python-dotenv
+flask
+ipykernel
+networkx
+nbformat
+apscheduler

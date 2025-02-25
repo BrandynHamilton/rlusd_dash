@@ -1,0 +1,108 @@
+:root {
+    --wcm-color-fg-1: rgb(20, 20, 20);
+    --wcm-color-fg-2: rgb(121, 134, 134);
+    --wcm-color-fg-3: rgb(158, 169, 169);
+    --wcm-color-bg-1: rgb(255, 255, 255);
+    --wcm-color-bg-2: rgb(241, 243, 243);
+    --wcm-color-bg-3: rgb(228, 231, 231);
+    --wcm-color-overlay: rgba(0, 0, 0, 0.1);
+    --wcm-accent-color: #3396FF;
+    --wcm-accent-fill-color: #FFFFFF;
+    --wcm-container-border-radius: 8px;
+    --wcm-padding-small: 5px;
+    --wcm-margin-small: 5px;
+    --wcm-box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --font-family: 'Inter', sans-serif;
+    --font-size-large: 16px;
+    --font-size-medium: 12px;
+    --font-size-small: 10px;
+}
+
+body {
+    font-family: var(--font-family);
+}
+
+.metrics-container {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between; /* Use space-between to distribute items evenly */
+    gap: 10px; /* Adjust gap as needed */
+    padding: 20px;
+    background-color: var(--wcm-color-bg-1);
+    border-radius: var(--wcm-container-border-radius);
+    box-shadow: 0 4px 8px var(--wcm-color-overlay);
+}
+
+.metric {
+    flex: 1 1 calc(20% - 20px); /* Adjust percentage based on the number of metrics */
+    max-width: calc(20% - 20px); /* Adjust percentage based on the number of metrics */
+    padding: 15px;
+    background-color: var(--wcm-color-bg-2);
+    border-radius: var(--wcm-button-border-radius);
+    text-align: center;
+    color: var(--wcm-color-fg-1);
+    margin: 10px 0;
+}
+
+.label {
+    display: block;
+    color: var(--wcm-color-fg-2);
+    font-size: var(--wcm-text-small-regular-size);
+}
+
+.value {
+    display: block;
+    color: var(--wcm-accent-color);
+    font-size: var(--wcm-text-medium-regular-size);
+}
+
+.dash-table-container {
+    margin: 20px auto; /* Center the table */
+    padding: 10px;
+    border-radius: var(--wcm-container-border-radius);
+    background-color: var(--wcm-color-bg-1);
+    box-shadow: 0 4px 8px var(--wcm-color-overlay);
+}
+
+/* Table Header */
+.dash-table-container .dash-header {
+    background-color: var(--wcm-color-bg-2);
+    font-weight: bold;
+    color: var(--wcm-color-fg-1);
+}
+
+/* Table Cell */
+.dash-table-container .dash-cell {
+    height: auto;
+    min-width: 150px;
+    width: 150px;
+    max-width: 150px;
+    white-space: normal;
+    font-family: var(--font-primary, "Inter");
+    background-color: var(--color-background);
+    color: var(--wcm-color-fg-2);
+    padding: 10px;
+    border: 1px solid var(--color-border);
+}
+
+/* Data Row */
+.dash-table-container .dash-data {
+    border: 1px solid var(--color-border);
+    padding: 10px;
+}
+
+.graph-container {
+    background-color: #fff;
+    padding: 20px;
+    border: 2px solid #000;
+    margin: 20px auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 400px;
+    max-width: 800px;
+    width: 90%;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+}
+

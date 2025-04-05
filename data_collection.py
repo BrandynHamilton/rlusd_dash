@@ -22,8 +22,8 @@ import requests
 from python_scripts.utils import (call_api, get_pagination_results)
 from python_scripts.data_processing import (clean_dataset_values)
 
-from defiquant.defiquant.sql import (pool_data, active_addresses, token_dex_stats)
-from defiquant.defiquant.core import (flipside_api_results,dune_api_results)
+from defiquant import (pool_data, active_addresses, token_dex_stats)
+from defiquant import (flipside_api_results,dune_api_results)
 
 load_dotenv()
 
@@ -51,24 +51,44 @@ for path in abi_paths:
 
 cache = Cache('data_collection')
 
-def update_cache_data(data, key='timeseries',time_col='dt', granularity='H'):
+def update_cache_data(data, key='timeseries',time_col='dt',keep_subset=None, granularity='H'):
     #timeseries column must have dt as name, 
-    new_data = pd.DataFrame([data])
+
+    if keep_subset is None:
+        keep_subset = []
+
+    keep_cols = [time_col]+keep_subset
+    
+    print(f'keep_cols: {keep_cols}')
+
+    if isinstance(data, pd.DataFrame):  
+        new_data = data
+    elif isinstance(data, dict):       
+        new_data = pd.DataFrame([data])
+    else:
+        raise TypeError('Pass a DataFrame or dict for data')
+
     historical_data = cache.get(f'{key}', pd.DataFrame())
     # historical_data = historical_data.reset_index()
     historical_data = pd.concat([historical_data, new_data]).reset_index(drop=True)
-    historical_data.drop_duplicates(subset=time_col, keep='last', inplace=True)
+    historical_data.drop_duplicates(subset=keep_cols, keep='last', inplace=True)
     historical_data[time_col] = pd.to_datetime(historical_data[time_col])
     
-    print(f'historical_data: {historical_data}')
+    print(f'historical_data before resampling:\n{historical_data}')
 
     if granularity is not None:
-        historical_data = historical_data.set_index(time_col)
-        historical_data = historical_data.sort_index()
-        historical_data = historical_data.resample(granularity).ffill()
-        historical_data = historical_data.reset_index()
+        group_cols = keep_subset
+        historical_data = (
+            historical_data
+            .set_index(time_col)
+            .sort_index()
+            .groupby(group_cols, group_keys=False)
+            .resample(granularity)
+            .ffill()
+            .reset_index()
+        )
 
-    print(f'historical_data: {historical_data}')
+    print(f'historical_data after resampling:\n{historical_data}')
     cache.set(f'{key}', historical_data)
     print(f'Saved {key} with {granularity}')
 
@@ -166,7 +186,7 @@ def hourly_data():
     print(f'Data collected at {today_utc}')
     return {"status": "success", "timestamp": today_utc.isoformat()}
 
-def ethereum_pool_data():
+def ethereum_pool_data(data_start_date):
     eth_rlusd_pool_query1 = pool_data('0xd001ae433f254283fece51d4acce8c53263aa186',start_date=data_start_date)
     eth_rlusd_pool = flipside_api_results(eth_rlusd_pool_query1,FLIPSIDE_KEY)
 
@@ -193,7 +213,7 @@ def ethereum_pool_data():
 
     return eth_rlusd_pool
 
-def dex_data():
+def dex_data(data_start_date):
     rlusd_eth_dex_stats = dune_api_results(DUNE_QUERY_ID,True,DUNE_QUERY_DIR)
 
     xrpl_vol_base_url = f"https://api.geckoterminal.com/api/v2/networks/xrpl/pools/524C555344000000000000000000000000000000.rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De_XRP/ohlcv/day"

@@ -22,13 +22,21 @@ import requests
 from python_scripts.utils import (call_api, get_pagination_results)
 from python_scripts.data_processing import (clean_dataset_values)
 
+from defiquant.defiquant.sql import (pool_data, active_addresses, token_dex_stats)
+from defiquant.defiquant.core import (flipside_api_results,dune_api_results)
+
 load_dotenv()
 
 app = Flask(__name__)
 
-RLUSD_XRP = os.getenv('RLUSD_XRP')
-RLUSD_ETHEREUM = os.getenv('RLUSD_ETHEREUM')
+DUNE_QUERY_ID = os.getenv('DUNE_QUERY_ID')
+RLUSD_XRP_ADDRESS = os.getenv('RLUSD_XRP')
+RLUSD_ETHEREUM_ADDRESS = os.getenv('RLUSD_ETHEREUM')
 ETHEREUM_GATEWAY = os.getenv('ETHEREUM_GATEWAY')
+
+DUNE_QUERY_DIR = 'data/rlusd_eth_dex_stats.csv'
+
+FLIPSIDE_KEY = os.getenv('ETHEREUM_GATEWAY')
 
 w3 = Web3(Web3.HTTPProvider(ETHEREUM_GATEWAY))
 
@@ -70,14 +78,14 @@ def supply_data():
     rlusd_XRP_supply = None
 
     try:
-        rlusd_contract = w3.eth.contract(address=RLUSD_ETHEREUM, abi=abis['abi/erc20_abi.json'])
+        rlusd_contract = w3.eth.contract(address=RLUSD_ETHEREUM_ADDRESS, abi=abis['abi/erc20_abi.json'])
         rlusd_ETH_supply = rlusd_contract.functions.totalSupply().call() / 1e18
     except Exception as e:
         print(f'web3.py call failed: {e}')
 
     # XRPL Supply
     try:
-        base_url = f'https://api.xrpscan.com/api/v1/account/{RLUSD_XRP}/obligations'
+        base_url = f'https://api.xrpscan.com/api/v1/account/{RLUSD_XRP_ADDRESS}/obligations'
         data = call_api(base_url)
         rlusd_raw = pd.DataFrame(data)
         rlusd_XRP_supply = float(rlusd_raw['value'].values[0])
@@ -90,7 +98,7 @@ def xrpl_pools(pool='rhWTXC2m2gGGA9WozUaoMm6kLAVPb1tcS3'):
 
     "This gets all rlusd pools in AMM or returns a singlular pool"
 
-    rl_usd_xrp_pool_data= None
+    rl_usd_xrp_pool_data = None
 
     if pool is None:
         print(f'pool is none')
@@ -159,10 +167,10 @@ def hourly_data():
     return {"status": "success", "timestamp": today_utc.isoformat()}
 
 def ethereum_pool_data():
-    eth_rlusd_pool_query1 = lp_data('0xd001ae433f254283fece51d4acce8c53263aa186',start_date=data_start_date)
+    eth_rlusd_pool_query1 = pool_data('0xd001ae433f254283fece51d4acce8c53263aa186',start_date=data_start_date)
     eth_rlusd_pool = flipside_api_results(eth_rlusd_pool_query1,FLIPSIDE_KEY)
 
-    eth_rlusd_pool_query2 = lp_data('0xcc6d2f26d363836f85a42d249e145ec0320d3e55',start_date=data_start_date)
+    eth_rlusd_pool_query2 = pool_data('0xcc6d2f26d363836f85a42d249e145ec0320d3e55',start_date=data_start_date)
     eth_rlusd_pool2 = flipside_api_results(eth_rlusd_pool_query2,FLIPSIDE_KEY)
 
     eth_rlusd_pool.dropna(inplace=True)
@@ -186,7 +194,7 @@ def ethereum_pool_data():
     return eth_rlusd_pool
 
 def dex_data():
-    rlusd_eth_dex_stats = dune_api_results(4695750,True,'data/rlusd_eth_dex_stats.csv')
+    rlusd_eth_dex_stats = dune_api_results(DUNE_QUERY_ID,True,DUNE_QUERY_DIR)
 
     xrpl_vol_base_url = f"https://api.geckoterminal.com/api/v2/networks/xrpl/pools/524C555344000000000000000000000000000000.rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De_XRP/ohlcv/day"
     data = call_api(xrpl_vol_base_url)

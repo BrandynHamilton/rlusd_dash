@@ -6,13 +6,6 @@ import pandas as pd
 
 from flask import Flask, jsonify
 
-from plotly.subplots import make_subplots
-import plotly.graph_objects as go
-import plotly.express as px
-import plotly.io as pio
-import plotly.offline as pyo
-import plotly.colors as pc
-
 import datetime as dt
 from datetime import timedelta
 import sys
@@ -25,6 +18,9 @@ import json
 from diskcache import Cache
 from web3 import Web3
 import requests
+
+from python_scripts.utils import (call_api, get_pagination_results)
+from python_scripts.data_processing import (clean_dataset_values)
 
 load_dotenv()
 
@@ -47,139 +43,191 @@ for path in abi_paths:
 
 cache = Cache('data_collection')
 
-def call_api(base_url):
-    response = requests.get(base_url)
-
-    # Check if the request was successful
-    if response.status_code == 200:
-        data = response.json()
-        print("data:", data)
-        return data
-    else:
-        print("Error:", response.status_code, response.text)
-        return None
-
-def get_pagination_results(base_url):
-    # Pagination parameters
-    limit = 100  # Number of records per request
-    offset = 0  # Start from the first record
-    all_results = []  # Store all retrieved results
-
-    while True:
-        # Construct URL with pagination parameters
-        url = f"{base_url}?offset={offset}&limit={limit}"
-        
-        # Make API request
-        response = requests.get(url)
-        
-        # Check for successful response
-        if response.status_code != 200:
-            print(f"Error: {response.status_code} - {response.text}")
-            break
-        
-        # Parse JSON response
-        data = response.json()
-        
-        # Append results
-        if not data:  # Stop when no more data is returned
-            break
-        
-        all_results.extend(data)
-        
-        # Update offset to fetch the next batch
-        offset += limit
-
-    # Print the total number of results retrieved
-    print(f"Total records fetched: {len(all_results)}")
-    return all_results
-
-def update_historical_data(live_comp):
-    new_data = pd.DataFrame([live_comp])
-    historical_data = cache.get(f'timeseries', pd.DataFrame())
+def update_cache_data(data, key='timeseries',time_col='dt', granularity='H'):
+    #timeseries column must have dt as name, 
+    new_data = pd.DataFrame([data])
+    historical_data = cache.get(f'{key}', pd.DataFrame())
+    # historical_data = historical_data.reset_index()
     historical_data = pd.concat([historical_data, new_data]).reset_index(drop=True)
-    historical_data.drop_duplicates(subset='dt', keep='last', inplace=True)
-    cache.set(f'timeseries', historical_data)
+    historical_data.drop_duplicates(subset=time_col, keep='last', inplace=True)
+    historical_data[time_col] = pd.to_datetime(historical_data[time_col])
+    
+    print(f'historical_data: {historical_data}')
 
-def main():
+    if granularity is not None:
+        historical_data = historical_data.set_index(time_col)
+        historical_data = historical_data.sort_index()
+        historical_data = historical_data.resample(granularity).ffill()
+        historical_data = historical_data.reset_index()
+
+    print(f'historical_data: {historical_data}')
+    cache.set(f'{key}', historical_data)
+    print(f'Saved {key} with {granularity}')
+
+def supply_data():
+    # Ethereum Supply
+    rlusd_ETH_supply = None
+    rlusd_XRP_supply = None
+
+    try:
+        rlusd_contract = w3.eth.contract(address=RLUSD_ETHEREUM, abi=abis['abi/erc20_abi.json'])
+        rlusd_ETH_supply = rlusd_contract.functions.totalSupply().call() / 1e18
+    except Exception as e:
+        print(f'web3.py call failed: {e}')
+
+    # XRPL Supply
+    try:
+        base_url = f'https://api.xrpscan.com/api/v1/account/{RLUSD_XRP}/obligations'
+        data = call_api(base_url)
+        rlusd_raw = pd.DataFrame(data)
+        rlusd_XRP_supply = float(rlusd_raw['value'].values[0])
+    except Exception as e:
+        print(f'xrpscan call failed: {e}')
+
+    return rlusd_XRP_supply, rlusd_ETH_supply
+
+def xrpl_pools(pool='rhWTXC2m2gGGA9WozUaoMm6kLAVPb1tcS3'):
+
+    "This gets all rlusd pools in AMM or returns a singlular pool"
+
+    rl_usd_xrp_pool_data= None
+
+    if pool is None:
+        print(f'pool is none')
+
+        try:
+
+            base_url = f'https://api.xrpscan.com/api/v1/amm/pools'
+            amm_data = get_pagination_results(base_url)
+            amm_df = pd.DataFrame(amm_data)
+
+            amm_df["AssetName_Extracted"] = amm_df["AssetName"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
+            amm_df["Asset2Name_Extracted"] = amm_df["Asset2Name"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
+
+            filtered_df = amm_df[(amm_df["AssetName_Extracted"] == "RLUSD") | (amm_df["Asset2Name_Extracted"] == "RLUSD")]
+
+            rlusd_pools = filtered_df['Account'].unique()
+
+            all_results = []
+
+            for ammpool in rlusd_pools:
+                base_url = f'https://api.xrpscan.com/api/v1/amm/{ammpool}'
+                data = call_api(base_url)
+                all_results.append(data)
+
+            rl_usd_xrp_pool_data = pd.DataFrame(all_results)
+        except Exception as e:
+            print(f'amm call failed: {e}')
+    else:
+        try:
+            #I believe there is only one xrp/rlusd pool so for now only tracking that
+            base_url = f'https://api.xrpscan.com/api/v1/amm/{pool}'
+            data = call_api(base_url)
+            rl_usd_xrp_pool_data = pd.DataFrame([data])
+        except Exception as e:
+            print(f'amm call failed: {e}')
+    
+    return rl_usd_xrp_pool_data
+
+def hourly_data():
     print(f'Running Main')
-    rlusd_contract = w3.eth.contract(address=RLUSD_ETHEREUM, abi=abis['abi/erc20_abi.json'])
-    rlusd_ETH_supply = rlusd_contract.functions.totalSupply().call() /1e18
-    base_url = f'https://api.xrpscan.com/api/v1/account/{RLUSD_XRP}/obligations'
-    data = call_api(base_url)
-    rlusd_raw = pd.DataFrame(data)
-    rlusd_XRP_supply = float(rlusd_raw['value'].values[0])
 
+    # Here we are collecting supply by chain, and supply in XRPL AMM 
 
-    #This gets all rlusd pools
+    rlusd_XRP_supply, rlusd_ETH_supply = supply_data()
+    
+    rl_usd_xrp_pool_data = xrpl_pools(pool='rhWTXC2m2gGGA9WozUaoMm6kLAVPb1tcS3')
 
-    # base_url = f'https://api.xrpscan.com/api/v1/amm/pools'
-    # amm_data = get_pagination_results(base_url)
-    # amm_df = pd.DataFrame(amm_data)
-
-    # amm_df["AssetName_Extracted"] = amm_df["AssetName"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
-    # amm_df["Asset2Name_Extracted"] = amm_df["Asset2Name"].apply(lambda x: x.get("name") if isinstance(x, dict) else None)
-
-    # filtered_df = amm_df[(amm_df["AssetName_Extracted"] == "RLUSD") | (amm_df["Asset2Name_Extracted"] == "RLUSD")]
-
-    # rlusd_pools = filtered_df['Account'].unique()
-
-    # all_results = []
-
-    # for pool in rlusd_pools:
-    #     base_url = f'https://api.xrpscan.com/api/v1/amm/{pool}'
-    #     data = call_api(base_url)
-    #     all_results.append(data)
-
-    # rl_usd_xrp_pool_data = pd.DataFrame(all_results)
-
-    #I believe there is only one xrp/rlusd pool so for now only tracking that
-    base_url = f'https://api.xrpscan.com/api/v1/amm/rhWTXC2m2gGGA9WozUaoMm6kLAVPb1tcS3'
-    data = call_api(base_url)
-    rl_usd_xrp_pool_data = pd.DataFrame([data])
-
-    rl_usd_xrp_pool_data["amount2_value"] = rl_usd_xrp_pool_data["amount2"].apply(lambda x: float(x["value"]) if isinstance(x, dict) and "value" in x else None)
-
-    rl_usd_xrp_pool_data["token1"] = rl_usd_xrp_pool_data["amount"].apply(lambda x: x["currency"] if isinstance(x, dict) else "XRP")
-    rl_usd_xrp_pool_data["amount1"] = rl_usd_xrp_pool_data["amount"].apply(lambda x: float(x["value"]) if isinstance(x, dict) and "value" in x else pd.to_numeric(x, errors="coerce"))
-
-    # Extract currency from 'amount2'
-    rl_usd_xrp_pool_data["token2"] = rl_usd_xrp_pool_data["amount2"].apply(lambda x: x["currency"] if isinstance(x, dict) else "XRP")
-    rl_usd_xrp_pool_data["amount2"] = rl_usd_xrp_pool_data["amount2"].apply(lambda x: float(x["value"]) if isinstance(x, dict) and "value" in x else pd.to_numeric(x, errors="coerce"))
-
-    rl_usd_xrp_pool_data["token1"] = rl_usd_xrp_pool_data["token1"].replace("524C555344000000000000000000000000000000", "RLUSD")
-    rl_usd_xrp_pool_data["token2"] = rl_usd_xrp_pool_data["token2"].replace("524C555344000000000000000000000000000000", "RLUSD")
-
-    xpr_rlusd_pool = rl_usd_xrp_pool_data[
-        ((rl_usd_xrp_pool_data["token1"] == "XRP") | (rl_usd_xrp_pool_data["token1"] == "RLUSD")) &
-        ((rl_usd_xrp_pool_data["token2"] == "XRP") | (rl_usd_xrp_pool_data["token2"] == "RLUSD"))
-    ]
-
-    xpr_rlusd_pool['amount1_norm'] = xpr_rlusd_pool['amount1'] / 1e6
-
-    rlusd_in_xrp_lp = xpr_rlusd_pool['amount2_value'].values[0]
-
-    xrp_in_xrp_lp = xpr_rlusd_pool['amount1_norm'].values[0]
+    _, _, rlusd_in_xrp_lp, xrp_in_xrp_lp = clean_dataset_values(rl_usd_xrp_pool_data)
 
     today_utc = dt.datetime.now(dt.timezone.utc) 
     formatted_today_utc = today_utc.strftime('%Y-%m-%d %H:00:00')
 
     timeseries_entry = {
         "dt":today_utc,
+        "hour":formatted_today_utc,
         "xrp_bal":xrp_in_xrp_lp,
         "rlusd_bal":rlusd_in_xrp_lp,
         "RLUSD_XRPL_Supply":rlusd_XRP_supply,
         "RLUSD_ETH_Supply":rlusd_ETH_supply
     }
 
-    update_historical_data(timeseries_entry)
+    update_cache_data(data=timeseries_entry,key='timeseries',
+                      time_col='dt',granularity='H')
 
     print(f'Data collected at {today_utc}')
     return {"status": "success", "timestamp": today_utc.isoformat()}
 
+def ethereum_pool_data():
+    eth_rlusd_pool_query1 = lp_data('0xd001ae433f254283fece51d4acce8c53263aa186',start_date=data_start_date)
+    eth_rlusd_pool = flipside_api_results(eth_rlusd_pool_query1,FLIPSIDE_KEY)
+
+    eth_rlusd_pool_query2 = lp_data('0xcc6d2f26d363836f85a42d249e145ec0320d3e55',start_date=data_start_date)
+    eth_rlusd_pool2 = flipside_api_results(eth_rlusd_pool_query2,FLIPSIDE_KEY)
+
+    eth_rlusd_pool.dropna(inplace=True)
+    eth_rlusd_pool2.dropna(inplace=True)
+
+    eth_rlusd_pool = pd.concat([eth_rlusd_pool.drop(columns=['total_tvl','__row_index']),eth_rlusd_pool2.drop(columns=['total_tvl','__row_index'])]).groupby(['symbol','dt']).sum().reset_index()
+
+    eth_rlusd_pool['dt'] = pd.to_datetime(eth_rlusd_pool['dt'])
+    eth_rlusd_pool.set_index('dt',inplace=True)
+
+    eth_rlusd_pool.sort_index(inplace=True, ascending=False)
+    total_tvl = eth_rlusd_pool.groupby(eth_rlusd_pool.index)['tvl'].sum()
+
+    eth_rlusd_pool = eth_rlusd_pool.merge(
+        total_tvl.to_frame('total_tvl'),
+        left_index=True,
+        right_index=True,
+        how='inner'
+    )
+
+    return eth_rlusd_pool
+
+def dex_data():
+    rlusd_eth_dex_stats = dune_api_results(4695750,True,'data/rlusd_eth_dex_stats.csv')
+
+    xrpl_vol_base_url = f"https://api.geckoterminal.com/api/v2/networks/xrpl/pools/524C555344000000000000000000000000000000.rMxCKbEDwqr76QuheSUMdEGf4B9xJ8m5De_XRP/ohlcv/day"
+    data = call_api(xrpl_vol_base_url)
+
+    xrpl_vol = pd.DataFrame(data['data']['attributes']['ohlcv_list'])
+
+    # Rename columns for clarity (assuming standard OHLCV format)
+    xrpl_vol.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+
+    # Convert timestamp to datetime for readability
+    xrpl_vol['timestamp'] = pd.to_datetime(xrpl_vol['timestamp'], unit='s')
+
+    rlusd_eth_dex_stats['dt'] = pd.to_datetime(rlusd_eth_dex_stats['dt'])
+    rlusd_eth_dex_stats['dt'] = rlusd_eth_dex_stats['dt'].dt.strftime('%Y-%m-%d')
+
+    xrpl_vol.set_index('timestamp',inplace=True)
+    xrpl_vol['blockchain'] = 'XRPL'
+
+    rlusd_eth_dex_stats['blockchain'] = 'Ethereum'
+    rlusd_eth_dex_stats.rename(columns={"vol":"volume"},inplace=True)
+    rlusd_eth_dex_stats.set_index('dt',inplace=True)
+    rlusd_eth_dex_stats.index = pd.to_datetime(rlusd_eth_dex_stats.index)
+
+    filtered_rlusd_eth_dex = rlusd_eth_dex_stats[['blockchain','volume']].resample('D').agg({
+        "blockchain":'last',
+        "volume":'sum'
+    })
+    filtered_rlusd_xrpl_dex = xrpl_vol[['blockchain','volume']].resample('D').agg({
+        "blockchain":'last',
+        "volume":'sum'
+    })
+
+    combined_vol = pd.concat([filtered_rlusd_eth_dex, filtered_rlusd_xrpl_dex])
+
+    update_cache_data(data=combined_vol,key='dex_data',
+                      time_col='dt',granularity='D')
+
 # Create and start the scheduler
 scheduler = BackgroundScheduler()
 scheduler.add_job(
-    main, 
+    hourly_data, 
     trigger=CronTrigger(minute=0),  # Runs at the top of every hour
     id='data_fetch_job', 
     replace_existing=True
@@ -193,7 +241,7 @@ def home():
 @app.route('/run_job', methods=['POST'])
 def run_job():
     """Endpoint to manually trigger the job"""
-    result = main()
+    result = hourly_data()
     return jsonify(result)
 
 @app.route('/status', methods=['GET'])
@@ -203,6 +251,17 @@ def job_status():
     if job:
         return jsonify({"next_run_time": job.next_run_time.isoformat()})
     return jsonify({"error": "Job not found"}), 404
+
+@app.route('/dataset', methods=['GET'])
+def get_timeseries():
+    """Returns cached dataset"""
+    dataset = cache.get('timeseries')
+
+    if dataset.empty:
+        return jsonify({"error":"No data found"}), 404
+
+    dataset_json = dataset.to_dict(orient='records')
+    return jsonify(dataset_json), 200
 
 @app.route('/clear_cache', methods=['POST'])
 def clear_cache():

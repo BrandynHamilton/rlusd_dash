@@ -29,7 +29,7 @@ from dash import dash_table
 import requests
 from dune_client.client import DuneClient
 
-from data_processing import main
+from python_scripts.data_processing import main
 
 from IPython.display import Image, display
 

@@ -1,9 +1,18 @@
 import json
+import requests
+import time
+import pandas as pd
+import os
+from dotenv import load_dotenv
+from dune_client.client import DuneClient
+
+load_dotenv()
+
+DUNE_KEY = os.getenv('DUNE_API_KEY')
+
+dune = DuneClient(DUNE_KEY)
 
 def flipside_api_results(query, api_key, attempts=10, delay=30):
-    import requests
-    import time
-    import pandas as pd
 
     url = "https://api-v2.flipsidecrypto.xyz/json-rpc"
     headers = {
@@ -101,3 +110,79 @@ def flipside_api_results(query, api_key, attempts=10, delay=30):
             raise Exception(f"Polling error: {resp_json}")
 
     raise TimeoutError(f"Query did not complete after {attempts} attempts.")
+
+def prepare_data_for_simulation(price_timeseries, start_date, end_date):
+    """
+    Ensure price_timeseries has entries for start_date and end_date.
+    If not, fill in these dates using the last available data.
+    """
+
+    print(f'price index: {price_timeseries.index}')
+
+    price_timeseries.index = price_timeseries.index.tz_localize(None)
+    
+    # Check if start_date and end_date exist in the data
+    required_dates = pd.date_range(start=start_date, end=end_date, freq='H')
+    all_dates = price_timeseries.index.union(required_dates)
+    
+    # Reindex the dataframe to ensure all dates from start to end are present
+    price_timeseries = price_timeseries.reindex(all_dates)
+    
+    # Forward fill to handle NaN values if any dates were missing
+    price_timeseries.fillna(method='ffill', inplace=True)
+
+    return price_timeseries
+
+def dune_api_results(query_num, save_csv=False, csv_path=None):
+    results = dune.get_latest_result(query_num)
+    df = pd.DataFrame(results.result.rows)
+
+    if save_csv and csv_path:
+        df.to_csv(csv_path, index=False)
+    return df
+
+def call_api(base_url):
+    response = requests.get(base_url)
+
+    # Check if the request was successful
+    if response.status_code == 200:
+        data = response.json()
+        print("data:", data)
+        return data
+    else:
+        print("Error:", response.status_code, response.text)
+        return None
+
+def get_pagination_results(base_url):
+    # Pagination parameters
+    limit = 100  # Number of records per request
+    offset = 0  # Start from the first record
+    all_results = []  # Store all retrieved results
+
+    while True:
+        # Construct URL with pagination parameters
+        url = f"{base_url}?offset={offset}&limit={limit}"
+        
+        # Make API request
+        response = requests.get(url)
+        
+        # Check for successful response
+        if response.status_code != 200:
+            print(f"Error: {response.status_code} - {response.text}")
+            break
+        
+        # Parse JSON response
+        data = response.json()
+        
+        # Append results
+        if not data:  # Stop when no more data is returned
+            break
+        
+        all_results.extend(data)
+        
+        # Update offset to fetch the next batch
+        offset += limit
+
+    # Print the total number of results retrieved
+    print(f"Total records fetched: {len(all_results)}")
+    return all_results

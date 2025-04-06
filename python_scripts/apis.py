@@ -1,4 +1,4 @@
-from utils import call_api
+from python_scripts.utils import call_api
 from defiquant import dune_api_results
 import pandas as pd
 import requests
@@ -8,6 +8,10 @@ import json
 from dotenv import load_dotenv
 from defiquant import (pool_data, active_addresses, token_dex_stats)
 from defiquant import (flipside_api_results,dune_api_results)
+from cachetools import TTLCache, cached
+
+daily_cache = TTLCache(maxsize=100, ttl=7200)  # Cache valid for 6h for flexibility
+hourly_cache = TTLCache(maxsize=100, ttl=3000)  # Cache valid for 50m for flexibility 
 
 load_dotenv()
 

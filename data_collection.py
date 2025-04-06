@@ -1,26 +1,19 @@
-from calendar import Day
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import os
 import pandas as pd
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 import datetime as dt
-from datetime import timedelta
-import sys
-import requests
 from dotenv import load_dotenv
 
-import time
 import json
 
 from diskcache import Cache
 from web3 import Web3
-import requests
 
-from python_scripts.utils import (call_api, get_pagination_results)
 from python_scripts.data_processing import (clean_dataset_values)
 from python_scripts.apis import (supply_data,xrpl_pools ,ethereum_pool_data)
 
@@ -34,7 +27,7 @@ RLUSD_ETHEREUM_ADDRESS = os.getenv('RLUSD_ETHEREUM_ADDRESS')
 ETHEREUM_GATEWAY = os.getenv('ETHEREUM_GATEWAY')
 
 DUNE_QUERY_DIR = 'data/rlusd_eth_dex_stats.csv'
-BACKUP_DIR = 'data/timeseries_cache.csv'
+BACKUP_DIR = 'data'
 
 FLIPSIDE_KEY = os.getenv('FLIPSIDE_KEY')
 
@@ -51,7 +44,7 @@ for path in abi_paths:
 
 cache = Cache('data_collection')
 
-def update_cache_data(data, key='timeseries',time_col='dt',keep_subset=None, granularity='H'):
+def update_cache_data(data, key='timeseries',time_col='dt',keep_subset=None, granularity=None):
     #timeseries column must have dt as name, 
 
     if keep_subset is None:
@@ -76,8 +69,10 @@ def update_cache_data(data, key='timeseries',time_col='dt',keep_subset=None, gra
     
     print(f'historical_data before resampling:\n{historical_data}')
 
+    breakpoint()
+
     if granularity is not None:
-        group_cols = keep_subset
+        group_cols = keep_cols
         historical_data = (
             historical_data
             .set_index(time_col)
@@ -117,7 +112,7 @@ def hourly_data():
     }
 
     update_cache_data(data=timeseries_entry,key='timeseries',
-                      time_col='dt',granularity='H')
+                      time_col='hour',granularity=None)
 
     print(f'Hourly data collected at {today_utc}')
     return {"status": "success", "timestamp": today_utc.isoformat()}
@@ -150,11 +145,11 @@ def daily_data():
 
     update_cache_data(data=eth_rlusd_pool.reset_index(),key='eth_rlusd_pool_data',
                       time_col='dt',keep_subset=['symbol'],
-                      granularity='D')
+                      granularity=None)
     
     update_cache_data(data=combined_vol.rename_axis('dt').reset_index(),key='dex_data',
                       time_col='dt',keep_subset=['blockchain'],
-                      granularity='D')
+                      granularity=None)
     
     print(f'Daily data collected at {today_utc}')
     return {"status": "success", "timestamp": today_utc.isoformat()}
@@ -182,13 +177,37 @@ def home():
 @app.route('/run_job', methods=['POST'])
 def run_job():
     """Endpoint to manually trigger the job"""
-    result = hourly_data()
+    data = request.get_json()
+    print(F'data: {data}')
+    if not data:
+        return jsonify({"status": "error", "message": "Missing JSON payload"}), 400
+
+    job_type = data.get('type')
+    if job_type == 'hour':
+        result = hourly_data()
+    elif job_type == 'day':
+        result = daily_data()
+    else:
+        return jsonify({"status": "error", "message": "Invalid job type"}), 400
+
     return jsonify(result)
 
 @app.route('/status', methods=['GET'])
 def job_status():
     """Check the next scheduled run time"""
-    job = scheduler.get_job('data_fetch_job')
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "Missing JSON payload"}), 400
+
+    job_type = data.get('type')
+
+    if job_type == 'hour':
+        job = scheduler.get_job('hourly_fetch_job')
+    elif job_type == 'day':
+        job = scheduler.get_job('daily_fetch_job')
+    else:
+        return jsonify({"status": "error", "message": "Invalid job type"}), 400
+
     if job:
         return jsonify({"next_run_time": job.next_run_time.isoformat()})
     return jsonify({"error": "Job not found"}), 404

@@ -7,3 +7,4 @@ ipykernel
 networkx
 nbformat
 apscheduler
+xrpl-py

@@ -1,4 +1,7 @@
-curl -X POST http://localhost:5256/run_job
+curl -X POST http://localhost:5256/run_job -H "Content-Type: application/json" -d "{\"type\":\"hour\"}"
+curl -X POST http://localhost:5256/run_job -H "Content-Type: application/json" -d "{\"type\":\"day\"}"
+curl -X POST http://localhost:5256/status -H "Content-Type: application/json" -d "{\"type\":\"hour\"}"
+curl -X POST http://localhost:5256/status -H "Content-Type: application/json" -d "{\"type\":\"day\"}"
 curl http://localhost:5256/status
 curl -X POST http://localhost:5256/clear_cache
 

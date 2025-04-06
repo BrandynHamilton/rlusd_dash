@@ -141,8 +141,8 @@ def dune_api_results(query_num, save_csv=False, csv_path=None):
         df.to_csv(csv_path, index=False)
     return df
 
-def call_api(base_url):
-    response = requests.get(base_url)
+def call_api(base_url, params=None):
+    response = requests.get(base_url, params=params)
 
     # Check if the request was successful
     if response.status_code == 200:
